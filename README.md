@@ -19,7 +19,7 @@ On first launch the app downloads its own tools to
 
 | Tool | Version | Update |
 |---|---|---|
-| yt-dlp | latest | `yt-dlp -U` on every launch |
+| yt-dlp | latest at install | checked on launch, updated with the toolbar button |
 | ffmpeg, ffprobe | 9.0.2 (pinned, SHA-256 checked) | change `Tools.swift` |
 | deno | latest at install | delete it to reinstall |
 

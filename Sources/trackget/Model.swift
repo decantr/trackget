@@ -24,6 +24,15 @@ final class Model {
 	var status = ""
 	var log = ""
 	var saved_file: URL?
+	var installed_version = ""
+	var latest_version: String?
+
+	var update_available: Bool {
+		guard let latest_version, !installed_version.isEmpty else {
+			return false
+		}
+		return installed_version.compare(latest_version, options: .numeric) == .orderedAscending
+	}
 
 	var can_download: Bool {
 		!busy && !trimmed(url).isEmpty && !trimmed(title).isEmpty && !trimmed(artist).isEmpty
@@ -35,10 +44,38 @@ final class Model {
 				self.status = "Installing \(tool.name)…"
 				try await Tools.install(tool)
 			}
-			self.status = "Updating yt-dlp…"
-			_ = try await runProcess(Tools.path("yt-dlp"), ["-U"], onLine: self.appendLog)
+			try await self.checkVersion()
 		}
-		status = "Ready"
+	}
+
+	func updateYtDlp() async {
+		await work("Updating yt-dlp") {
+			let status = try await runProcess(Tools.path("yt-dlp"), ["-U"], onLine: self.appendLog)
+			if status != 0 {
+				throw ShellError(message: "yt-dlp update failed, see log")
+			}
+			try await self.checkVersion()
+		}
+	}
+
+	private func checkVersion() async throws {
+		var version = ""
+		_ = try await runProcess(Tools.path("yt-dlp"), ["--version"]) { line in
+			version = trimmed(line)
+		}
+		installed_version = version
+
+		do {
+			latest_version = try await Tools.latestYtDlpVersion()
+		} catch {
+			appendLog("!! Version check failed: \(error.localizedDescription)")
+			status = "yt-dlp \(version) (could not check for updates)"
+			return
+		}
+
+		status = update_available
+			? "yt-dlp \(latest_version ?? "") is available (installed \(version))"
+			: "yt-dlp \(version) is up to date"
 	}
 
 	func lookUp() async {

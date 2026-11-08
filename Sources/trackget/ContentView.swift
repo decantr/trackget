@@ -22,7 +22,7 @@ struct ContentView: View {
 				Section {
 					TextField("Title", text: $model.title)
 					TextField("Artist", text: $model.artist)
-					DisclosureGroup("More details", isExpanded: $show_more) {
+					ClickableDisclosure(title: "More details", is_expanded: $show_more) {
 						TextField("Album", text: $model.album)
 						TextField("All artists", text: $model.artists, prompt: Text("Artist; Featured artist"))
 						TextField("Album artist", text: $model.album_artist)
@@ -49,7 +49,7 @@ struct ContentView: View {
 				}
 
 				Section {
-					DisclosureGroup("Log", isExpanded: $show_log) {
+					ClickableDisclosure(title: "Log", is_expanded: $show_log) {
 						ScrollView {
 							Text(model.log)
 								.font(.system(.caption, design: .monospaced))
@@ -66,6 +66,19 @@ struct ContentView: View {
 			footer
 		}
 		.frame(minWidth: 480, minHeight: 520)
+		.toolbar {
+			Button {
+				Task { await model.updateYtDlp() }
+			} label: {
+				Label(
+					model.update_available ? "Update yt-dlp to \(model.latest_version ?? "")" : "Update yt-dlp",
+					systemImage: model.update_available ? "arrow.down.circle.fill" : "arrow.triangle.2.circlepath"
+				)
+				.labelStyle(.titleAndIcon)
+			}
+			.help(model.installed_version.isEmpty ? "Update yt-dlp" : "Installed: yt-dlp \(model.installed_version)")
+			.disabled(model.busy)
+		}
 		.task { await model.prepareTools() }
 	}
 
@@ -112,4 +125,22 @@ struct ContentView: View {
 private func defaultFolder() -> URL {
 	FileManager.default.urls(for: .musicDirectory, in: .userDomainMask)[0]
 		.appendingPathComponent("trackget", isDirectory: true)
+}
+
+// The built-in macOS DisclosureGroup only toggles from the chevron
+private struct ClickableDisclosure<Content: View>: View {
+	let title: String
+	@Binding var is_expanded: Bool
+	@ViewBuilder let content: () -> Content
+
+	var body: some View {
+		DisclosureGroup(isExpanded: $is_expanded, content: content) {
+			Text(title)
+				.frame(maxWidth: .infinity, alignment: .leading)
+				.contentShape(Rectangle())
+				.onTapGesture {
+					withAnimation { is_expanded.toggle() }
+				}
+		}
+	}
 }

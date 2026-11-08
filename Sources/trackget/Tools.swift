@@ -51,6 +51,15 @@ enum Tools {
 		all.filter { !FileManager.default.isExecutableFile(atPath: path($0.name).path) }
 	}
 
+	static func latestYtDlpVersion() async throws -> String {
+		struct Release: Decodable {
+			let tag_name: String
+		}
+		let url = URL(string: "https://api.github.com/repos/yt-dlp/yt-dlp/releases/latest")!
+		let (data, _) = try await URLSession.shared.data(from: url)
+		return try JSONDecoder().decode(Release.self, from: data).tag_name
+	}
+
 	static func install(_ tool: Tool) async throws {
 		let file_manager = FileManager.default
 		try file_manager.createDirectory(at: bin_dir, withIntermediateDirectories: true)
