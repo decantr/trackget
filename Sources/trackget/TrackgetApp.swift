@@ -12,7 +12,7 @@ struct TrackgetApp: App {
 	@NSApplicationDelegateAdaptor(AppDelegate.self) private var app_delegate
 
 	var body: some Scene {
-		Window("trackget", id: "main") {
+		Window("TrackGet", id: "main") {
 			ContentView()
 		}
 		.windowResizability(.contentMinSize)

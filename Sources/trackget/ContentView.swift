@@ -78,8 +78,22 @@ struct ContentView: View {
 			}
 			.help(model.installed_version.isEmpty ? "Update yt-dlp" : "Installed: yt-dlp \(model.installed_version)")
 			.disabled(model.busy)
+
+			if let app_update = model.app_update {
+				Button {
+					Task { await model.installAppUpdate() }
+				} label: {
+					Label("Update TrackGet to \(app_update.version)", systemImage: "sparkles")
+						.labelStyle(.titleAndIcon)
+				}
+				.help("Installed: TrackGet \(Updater.current_version). TrackGet restarts after the update.")
+				.disabled(model.busy)
+			}
 		}
-		.task { await model.prepareTools() }
+		.task {
+			await model.prepareTools()
+			await model.checkAppUpdate()
+		}
 	}
 
 	private var footer: some View {

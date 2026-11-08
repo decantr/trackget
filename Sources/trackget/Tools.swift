@@ -55,9 +55,8 @@ enum Tools {
 		struct Release: Decodable {
 			let tag_name: String
 		}
-		let url = URL(string: "https://api.github.com/repos/yt-dlp/yt-dlp/releases/latest")!
-		let (data, _) = try await URLSession.shared.data(from: url)
-		return try JSONDecoder().decode(Release.self, from: data).tag_name
+		let release: Release = try await fetchJSON("https://api.github.com/repos/yt-dlp/yt-dlp/releases/latest")
+		return release.tag_name
 	}
 
 	static func install(_ tool: Tool) async throws {
@@ -72,9 +71,7 @@ enum Tools {
 		}
 
 		if let expected = tool.sha256 {
-			let digest = SHA256.hash(data: try Data(contentsOf: download))
-			let actual = digest.map { String(format: "%02x", $0) }.joined()
-			if actual != expected {
+			if try sha256Hex(of: download) != expected {
 				throw ShellError(message: "\(tool.name): checksum mismatch")
 			}
 		}
@@ -96,4 +93,22 @@ enum Tools {
 
 		try file_manager.setAttributes([.posixPermissions: 0o755], ofItemAtPath: target.path)
 	}
+}
+
+func sha256Hex(of file: URL) throws -> String {
+	SHA256.hash(data: try Data(contentsOf: file)).map { String(format: "%02x", $0) }.joined()
+}
+
+func fetchJSON<T: Decodable>(_ address: String) async throws -> T {
+	let (data, response) = try await URLSession.shared.data(from: URL(string: address)!)
+	if let http = response as? HTTPURLResponse, http.statusCode != 200 {
+		throw HTTPError(status: http.statusCode, address: address)
+	}
+	return try JSONDecoder().decode(T.self, from: data)
+}
+
+struct HTTPError: LocalizedError {
+	let status: Int
+	let address: String
+	var errorDescription: String? { "HTTP \(status) from \(address)" }
 }

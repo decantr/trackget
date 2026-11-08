@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 import Observation
 
@@ -26,6 +27,7 @@ final class Model {
 	var saved_file: URL?
 	var installed_version = ""
 	var latest_version: String?
+	var app_update: AppRelease?
 
 	var update_available: Bool {
 		guard let latest_version, !installed_version.isEmpty else {
@@ -45,6 +47,31 @@ final class Model {
 				try await Tools.install(tool)
 			}
 			try await self.checkVersion()
+		}
+	}
+
+	func checkAppUpdate() async {
+		do {
+			app_update = try await Updater.latestRelease()
+			if let app_update {
+				appendLog("== TrackGet \(app_update.version) is available (installed \(Updater.current_version))")
+			}
+		} catch {
+			appendLog("!! TrackGet update check failed: \(error.localizedDescription)")
+		}
+	}
+
+	func installAppUpdate() async {
+		guard let app_update else {
+			return
+		}
+		var staged = false
+		await work("Updating TrackGet to \(app_update.version)") {
+			try await Updater.stage(app_update, log: self.appendLog)
+			staged = true
+		}
+		if staged {
+			NSApplication.shared.terminate(nil)
 		}
 	}
 

@@ -1,4 +1,4 @@
-# trackget
+# TrackGet
 
 A small macOS app that downloads audio with yt-dlp, tags it and saves it to a folder.
 
@@ -7,7 +7,7 @@ A small macOS app that downloads audio with yt-dlp, tags it and saves it to a fo
 Needs the Xcode Command Line Tools (Swift 6) and macOS 14 or later.
 
 ```sh
-make app      # build build/trackget.app
+make app      # build build/TrackGet.app
 make run      # build and open
 make install  # copy to /Applications
 ```
@@ -24,6 +24,28 @@ On first launch the app downloads its own tools to
 | deno | latest at install | delete it to reinstall |
 
 To reinstall all tools, delete the `bin` folder and launch the app again.
+
+## Development
+
+Tools are managed with [mise](https://mise.jdx.dev) (`actionlint`). Swift comes from Xcode.
+
+```sh
+make bootstrap  # install mise tools and resolve packages
+make test       # needs Xcode, which ships Swift Testing
+make lint       # check the GitHub workflows
+```
+
+## Releasing
+
+Push a signed tag on a signed commit:
+
+```sh
+git tag -s v0.1.0 -m v0.1.0
+git push origin v0.1.0
+```
+
+The release workflow tests, builds and publishes `TrackGet.zip` with its SHA-256.
+The app offers the update only when GitHub shows the tagged commit as verified.
 
 ## License
 
