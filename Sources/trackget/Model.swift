@@ -12,6 +12,7 @@ final class Model {
 	var url = ""
 	var title = ""
 	var artist = ""
+	var artists = ""
 	var album = ""
 	var album_artist = ""
 	var year = ""
@@ -47,28 +48,34 @@ final class Model {
 				Tools.path("yt-dlp"),
 				[
 					"--skip-download", "--no-playlist", "--no-warnings",
-					"--print", "[title] %(track,title)s",
-					"--print", "[artist] %(artist,creator,uploader)s",
+					"--print", "[track] %(track)s",
+					"--print", "[artist] %(artist)s",
+					"--print", "[artists] %(artists)j",
+					"--print", "[video_title] %(title)s",
+					"--print", "[uploader] %(uploader,channel)s",
 					"--print", "[album] %(album)s",
 					"--print", "[year] %(release_year,upload_date>%Y)s",
 					trimmed(self.url),
 				]
 			) { line in
-				if let match = line.firstMatch(of: /^\[(title|artist|album|year)\] (.*)$/) {
+				if let match = line.firstMatch(of: /^\[(track|artist|artists|video_title|uploader|album|year)\] (.*)$/) {
 					fields[String(match.1)] = clean(String(match.2))
 				} else {
 					self.appendLog(line)
 				}
 			}
 
-			guard status == 0, let found_title = fields["title"], !found_title.isEmpty else {
+			guard status == 0, fields["video_title"]?.isEmpty == false else {
 				throw ShellError(message: "Look up failed, see log")
 			}
-			self.title = found_title
-			self.artist = fields["artist"] ?? ""
+
+			let guess = lookupGuess(fields)
+			self.title = guess.title
+			self.artist = guess.artist
+			self.artists = guess.artists.joined(separator: "; ")
 			self.album = fields["album"] ?? ""
 			self.year = fields["year"] ?? ""
-			self.status = "Found \"\(found_title)\""
+			self.status = "Found \"\(self.artist) - \(self.title)\""
 		}
 	}
 
@@ -131,6 +138,7 @@ final class Model {
 		let tags: [(String, String)] = [
 			("title", title),
 			("artist", artist),
+			("ARTISTS", target.pathExtension == "m4a" ? "" : artists),
 			("album", album),
 			("album_artist", album_artist),
 			("date", year),
@@ -176,6 +184,25 @@ private func trimmed(_ value: String) -> String {
 
 private func clean(_ value: String) -> String {
 	value == "NA" ? "" : trimmed(value)
+}
+
+private func lookupGuess(_ fields: [String: String]) -> TrackGuess {
+	let track = fields["track"] ?? ""
+	var artists = decodeArtists(fields["artists"] ?? "")
+	if artists.isEmpty, let artist = fields["artist"], !artist.isEmpty {
+		artists = [artist]
+	}
+	if !track.isEmpty && !artists.isEmpty {
+		return trackFromMetadata(track: track, artists: artists)
+	}
+	return guessTrack(videoTitle: fields["video_title"] ?? "", uploader: fields["uploader"] ?? "")
+}
+
+private func decodeArtists(_ json: String) -> [String] {
+	guard let list = try? JSONDecoder().decode([String].self, from: Data(json.utf8)) else {
+		return []
+	}
+	return list.filter { !$0.isEmpty }
 }
 
 private func uniqueFile(in folder: URL, name: String, ext: String) -> URL {

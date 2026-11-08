@@ -1,13 +1,16 @@
 APP = build/trackget.app
 BIN = .build/release/trackget
 
-.PHONY: bootstrap build app run install clean
+.PHONY: bootstrap build test app run install clean
 
 bootstrap:
 	swift package resolve
 
 build:
 	swift build -c release
+
+test:
+	swift test
 
 app: build
 	rm -rf $(APP)

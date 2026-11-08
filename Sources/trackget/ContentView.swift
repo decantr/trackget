@@ -24,6 +24,7 @@ struct ContentView: View {
 					TextField("Artist", text: $model.artist)
 					DisclosureGroup("More details", isExpanded: $show_more) {
 						TextField("Album", text: $model.album)
+						TextField("All artists", text: $model.artists, prompt: Text("Artist; Featured artist"))
 						TextField("Album artist", text: $model.album_artist)
 						TextField("Year", text: $model.year)
 						TextField("Genre", text: $model.genre)
