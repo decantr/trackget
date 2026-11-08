@@ -24,3 +24,12 @@ On first launch the app downloads its own tools to
 | deno | latest at install | delete it to reinstall |
 
 To reinstall all tools, delete the `bin` folder and launch the app again.
+
+## License
+
+Copyright (C) 2026 Shaw
+
+This program is free software: you can redistribute it and/or modify it under
+the terms of the GNU General Public License as published by the Free Software
+Foundation, either version 3 of the License, or (at your option) any later
+version. See [LICENSE](LICENSE).
