@@ -33,6 +33,7 @@ Tools are managed with [mise](https://mise.jdx.dev) (`actionlint`). Swift comes 
 make bootstrap  # install mise tools and resolve packages
 make test       # needs Xcode, which ships Swift Testing
 make lint       # check the GitHub workflows
+make icon       # rebuild Resources/AppIcon.icns after editing AppIcon.svg
 ```
 
 ## Releasing
