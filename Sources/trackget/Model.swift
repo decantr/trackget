@@ -41,12 +41,20 @@ final class Model {
 	}
 
 	func prepareTools() async {
-		await work("Checking tools") {
-			for tool in Tools.missing {
+		let missing = Tools.missing
+		guard !missing.isEmpty else {
+			return
+		}
+		await work("Installing tools") {
+			for tool in missing {
 				self.status = "Installing \(tool.name)…"
-				try await Tools.install(tool)
+				if tool.name == Tools.ytdlp.name {
+					try await Tools.install(Tools.ytDlpRelease(Tools.latestYtDlpVersion()))
+				} else {
+					try await Tools.install(tool)
+				}
 			}
-			try await self.checkVersion()
+			self.status = "Tools installed"
 		}
 	}
 
@@ -75,20 +83,29 @@ final class Model {
 		}
 	}
 
+	// yt-dlp -U refuses to update the folder build, so updates re-download the release instead
 	func updateYtDlp() async {
+		var updated = false
 		await work("Updating yt-dlp") {
-			let status = try await runProcess(Tools.path("yt-dlp"), ["-U"], onLine: self.appendLog)
-			if status != 0 {
-				throw ShellError(message: "yt-dlp update failed, see log")
-			}
-			try await self.checkVersion()
+			let version = try await Tools.latestYtDlpVersion()
+			self.status = "Downloading yt-dlp \(version)…"
+			try await Tools.install(Tools.ytDlpRelease(version))
+			updated = true
+		}
+		if updated {
+			await checkYtDlpVersion()
 		}
 	}
 
-	private func checkVersion() async throws {
+	func checkYtDlpVersion() async {
 		var version = ""
-		_ = try await runProcess(Tools.path("yt-dlp"), ["--version"]) { line in
-			version = trimmed(line)
+		do {
+			_ = try await runProcess(Tools.path("yt-dlp"), ["--version"]) { line in
+				version = trimmed(line)
+			}
+		} catch {
+			appendLog("!! yt-dlp did not start: \(error.localizedDescription)")
+			return
 		}
 		installed_version = version
 
@@ -96,13 +113,22 @@ final class Model {
 			latest_version = try await Tools.latestYtDlpVersion()
 		} catch {
 			appendLog("!! Version check failed: \(error.localizedDescription)")
-			status = "yt-dlp \(version) (could not check for updates)"
+			showIdleStatus("yt-dlp \(version) (could not check for updates)")
 			return
 		}
 
-		status = update_available
-			? "yt-dlp \(latest_version ?? "") is available (installed \(version))"
-			: "yt-dlp \(version) is up to date"
+		showIdleStatus(
+			update_available
+				? "yt-dlp \(latest_version ?? "") is available (installed \(version))"
+				: "yt-dlp \(version) is up to date"
+		)
+	}
+
+	// Background checks must not overwrite the status of a running look-up or download
+	private func showIdleStatus(_ text: String) {
+		if !busy {
+			status = text
+		}
 	}
 
 	func lookUp() async {

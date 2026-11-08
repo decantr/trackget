@@ -92,7 +92,9 @@ struct ContentView: View {
 		}
 		.task {
 			await model.prepareTools()
-			await model.checkAppUpdate()
+			async let ytdlp_check: Void = model.checkYtDlpVersion()
+			async let app_check: Void = model.checkAppUpdate()
+			_ = await (ytdlp_check, app_check)
 		}
 	}
 

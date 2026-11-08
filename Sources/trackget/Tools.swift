@@ -3,9 +3,10 @@ import Foundation
 
 struct Tool: Sendable {
 	let name: String
+	let executable: String
 	let url: URL
 	let sha256: String?
-	let zipped: Bool
+	let folder: Bool
 }
 
 enum Tools {
@@ -15,36 +16,43 @@ enum Tools {
 
 	static let ffmpeg_release = "https://ffmpeg.martin-riedl.de/download/macos/arm64/1789931890_9.0.2"
 
-	// yt-dlp and deno track latest and update themselves; ffmpeg is pinned
+	// The folder build starts in a fraction of a second; the single-file build unpacks itself on every run
+	static let ytdlp = Tool(
+		name: "yt-dlp",
+		executable: "yt-dlp/yt-dlp_macos",
+		url: URL(string: "https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp_macos.zip")!,
+		sha256: nil,
+		folder: true
+	)
+
 	static let all: [Tool] = [
-		Tool(
-			name: "yt-dlp",
-			url: URL(string: "https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp_macos")!,
-			sha256: nil,
-			zipped: false
-		),
+		ytdlp,
 		Tool(
 			name: "ffmpeg",
+			executable: "ffmpeg",
 			url: URL(string: "\(ffmpeg_release)/ffmpeg.zip")!,
 			sha256: "c8ed4c4e6978a03c485edbfe4e0a5dc2380f8a30bba5150531b31b094492d924",
-			zipped: true
+			folder: false
 		),
 		Tool(
 			name: "ffprobe",
+			executable: "ffprobe",
 			url: URL(string: "\(ffmpeg_release)/ffprobe.zip")!,
 			sha256: "fcbe839537485eaee7a7a8bc5cbc0f90d53617e80943e8a5b2e31cb851197ea6",
-			zipped: true
+			folder: false
 		),
 		Tool(
 			name: "deno",
+			executable: "deno",
 			url: URL(string: "https://github.com/denoland/deno/releases/latest/download/deno-aarch64-apple-darwin.zip")!,
 			sha256: nil,
-			zipped: true
+			folder: false
 		),
 	]
 
 	static func path(_ name: String) -> URL {
-		bin_dir.appendingPathComponent(name)
+		let tool = all.first { $0.name == name }!
+		return bin_dir.appendingPathComponent(tool.executable)
 	}
 
 	static var missing: [Tool] {
@@ -57,6 +65,27 @@ enum Tools {
 		}
 		let release: Release = try await fetchJSON("https://api.github.com/repos/yt-dlp/yt-dlp/releases/latest")
 		return release.tag_name
+	}
+
+	static func ytDlpRelease(_ version: String) async throws -> Tool {
+		let base = "https://github.com/yt-dlp/yt-dlp/releases/download/\(version)"
+		let (data, response) = try await URLSession.shared.data(from: URL(string: "\(base)/SHA2-256SUMS")!)
+		if let http = response as? HTTPURLResponse, http.statusCode != 200 {
+			throw HTTPError(status: http.statusCode, address: "\(base)/SHA2-256SUMS")
+		}
+		let line = String(decoding: data, as: UTF8.self)
+			.split(separator: "\n")
+			.first { $0.hasSuffix(" yt-dlp_macos.zip") }
+		guard let hash = line?.split(separator: " ").first else {
+			throw ShellError(message: "yt-dlp \(version) has no checksum for yt-dlp_macos.zip")
+		}
+		return Tool(
+			name: ytdlp.name,
+			executable: ytdlp.executable,
+			url: URL(string: "\(base)/yt-dlp_macos.zip")!,
+			sha256: String(hash),
+			folder: true
+		)
 	}
 
 	static func install(_ tool: Tool) async throws {
@@ -76,22 +105,21 @@ enum Tools {
 			}
 		}
 
-		let target = path(tool.name)
-		try? file_manager.removeItem(at: target)
-
-		if tool.zipped {
-			let status = try await runProcess(
-				URL(fileURLWithPath: "/usr/bin/ditto"),
-				["-x", "-k", download.path, bin_dir.path]
-			)
-			if status != 0 {
-				throw ShellError(message: "\(tool.name): unzip failed")
-			}
-		} else {
-			try file_manager.moveItem(at: download, to: target)
+		// Unpack beside the target first, so a failed unzip never leaves a half-replaced tool
+		let staging = bin_dir.appendingPathComponent(".staging-\(UUID().uuidString)", isDirectory: true)
+		defer { try? file_manager.removeItem(at: staging) }
+		let status = try await runProcess(
+			URL(fileURLWithPath: "/usr/bin/ditto"),
+			["-x", "-k", download.path, staging.path]
+		)
+		if status != 0 {
+			throw ShellError(message: "\(tool.name): unzip failed")
 		}
 
-		try file_manager.setAttributes([.posixPermissions: 0o755], ofItemAtPath: target.path)
+		let target = bin_dir.appendingPathComponent(tool.name)
+		try? file_manager.removeItem(at: target)
+		try file_manager.moveItem(at: tool.folder ? staging : staging.appendingPathComponent(tool.name), to: target)
+		try file_manager.setAttributes([.posixPermissions: 0o755], ofItemAtPath: path(tool.name).path)
 	}
 }
 
