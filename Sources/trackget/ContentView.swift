@@ -14,6 +14,9 @@ struct ContentView: View {
 				Section {
 					HStack {
 						TextField("URL", text: $model.url, prompt: Text("https://…"))
+						Button("Paste", systemImage: "doc.on.clipboard", action: pasteURL)
+							.help("Paste URL from clipboard")
+							.disabled(model.busy)
 						Button("Look Up") { Task { await model.lookUp() } }
 							.disabled(model.busy || model.url.isEmpty)
 					}
@@ -124,6 +127,13 @@ struct ContentView: View {
 			.disabled(!model.can_download)
 		}
 		.padding()
+	}
+
+	private func pasteURL() {
+		guard let text = NSPasteboard.general.string(forType: .string) else {
+			return
+		}
+		model.url = text.trimmingCharacters(in: .whitespacesAndNewlines)
 	}
 
 	private func chooseFolder() {
