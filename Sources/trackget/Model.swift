@@ -42,28 +42,33 @@ final class Model {
 
 	func lookUp() async {
 		await work("Looking up") {
-			var lines: [String] = []
+			var fields: [String: String] = [:]
 			let status = try await runProcess(
 				Tools.path("yt-dlp"),
 				[
 					"--skip-download", "--no-playlist", "--no-warnings",
-					"--print", "%(track,title)s",
-					"--print", "%(artist,creator,uploader)s",
-					"--print", "%(album|)s",
-					"--print", "%(release_year,upload_date>%Y)s",
+					"--print", "[title] %(track,title)s",
+					"--print", "[artist] %(artist,creator,uploader)s",
+					"--print", "[album] %(album)s",
+					"--print", "[year] %(release_year,upload_date>%Y)s",
 					trimmed(self.url),
 				]
-			) { line in lines.append(line) }
-
-			if status != 0 || lines.count < 4 {
-				lines.forEach(self.appendLog)
-				throw ShellError(message: "Look up failed")
+			) { line in
+				if let match = line.firstMatch(of: /^\[(title|artist|album|year)\] (.*)$/) {
+					fields[String(match.1)] = clean(String(match.2))
+				} else {
+					self.appendLog(line)
+				}
 			}
-			self.title = clean(lines[0])
-			self.artist = clean(lines[1])
-			self.album = clean(lines[2])
-			self.year = clean(lines[3])
-			self.status = "Found \"\(self.title)\""
+
+			guard status == 0, let found_title = fields["title"], !found_title.isEmpty else {
+				throw ShellError(message: "Look up failed, see log")
+			}
+			self.title = found_title
+			self.artist = fields["artist"] ?? ""
+			self.album = fields["album"] ?? ""
+			self.year = fields["year"] ?? ""
+			self.status = "Found \"\(found_title)\""
 		}
 	}
 
