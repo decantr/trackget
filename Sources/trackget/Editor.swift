@@ -36,6 +36,7 @@ final class Editor {
 	var playhead = 0.0
 	var view_start = 0.0
 	var view_length = 0.0
+	@ObservationIgnored private var last_manual_view = Date.distantPast
 	var playing = false
 	var busy = false
 	var status = ""
@@ -136,9 +137,7 @@ final class Editor {
 		ticker = Task { [weak self] in
 			while let self, self.playing, let player = self.player {
 				self.playhead = player.currentTime
-				if self.playhead > self.view_start + self.view_length {
-					self.view_start = min(self.playhead, self.duration - self.view_length)
-				}
+				self.follow()
 				if !player.isPlaying || player.currentTime >= self.trim_end {
 					self.stop()
 					break
@@ -174,7 +173,20 @@ final class Editor {
 	}
 
 	func pan(to start: Double) {
-		view_start = min(max(start, 0), max(0, duration - view_length))
+		last_manual_view = .now
+		view_start = clampedStart(start)
+	}
+
+	private func clampedStart(_ start: Double) -> Double {
+		min(max(start, 0), max(0, duration - view_length))
+	}
+
+	// Brings the playhead back into view during playback, unless the view moved by hand a moment ago
+	private func follow() {
+		let visible = playhead >= view_start && playhead <= view_start + view_length
+		if !visible && Date.now.timeIntervalSince(last_manual_view) > 1.5 {
+			view_start = clampedStart(playhead - view_length * 0.1)
+		}
 	}
 
 	func seek(_ time: Double) {

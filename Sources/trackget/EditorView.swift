@@ -27,7 +27,10 @@ struct EditorView: View {
 			} else {
 				Form {
 					Section {
-						WaveformView(editor: editor)
+						VStack(spacing: 6) {
+							WaveformView(editor: editor)
+							OverviewBar(editor: editor)
+						}
 						controls
 					} header: {
 						HStack {
@@ -243,9 +246,14 @@ struct WaveformView: View {
 			editor.togglePlay()
 			return .handled
 		}
-		.onAppear { pointer.start(editor) }
+		.onAppear {
+			pointer.start(editor)
+			focused = true
+		}
+		// Space only reaches a focused view, so a newly opened file takes focus
+		.onChange(of: editor.file) { focused = true }
 		.onDisappear { pointer.stop() }
-		.help("Click to move the playhead and drag the handles. Pinch or ⌘-scroll to zoom, swipe sideways to scroll, space to play.")
+		.help("Click to move the playhead and drag the handles. Pinch or ⌘-scroll to zoom, swipe sideways to scroll. Space plays and pauses.")
 	}
 
 	private func time(x: Double, width: Double) -> Double {
@@ -271,7 +279,7 @@ struct WaveformView: View {
 
 	private func draw(in context: inout GraphicsContext, size: CGSize) {
 		let width = size.width
-		let wave_height = size.height - 8
+		let wave_height = size.height
 		let middle = wave_height / 2
 
 		context.fill(Path(roundedRect: CGRect(origin: .zero, size: size), cornerRadius: 6), with: .color(.secondary.opacity(0.08)))
@@ -314,17 +322,56 @@ struct WaveformView: View {
 		let playhead_x = position(editor.playhead, width: width)
 		context.fill(Path(CGRect(x: playhead_x - 0.75, y: 0, width: 1.5, height: wave_height)), with: .color(.red))
 
-		if editor.is_zoomed {
-			let track = CGRect(x: 0, y: size.height - 3, width: width, height: 3)
-			context.fill(Path(roundedRect: track, cornerRadius: 1.5), with: .color(.secondary.opacity(0.2)))
-			let visible = CGRect(
-				x: editor.view_start / editor.duration * width,
-				y: size.height - 3,
-				width: max(4, editor.view_length / editor.duration * width),
-				height: 3
+	}
+}
+
+// Shows the whole song: the visible part as a thumb to drag, plus the playhead and split points
+struct OverviewBar: View {
+	@Bindable var editor: Editor
+	@State private var grab_offset: Double?
+
+	var body: some View {
+		GeometryReader { geometry in
+			let width = geometry.size.width
+			Canvas { context, size in
+				draw(in: &context, size: size)
+			}
+			.contentShape(Rectangle())
+			.gesture(
+				DragGesture(minimumDistance: 0)
+					.onChanged { value in
+						let time = time(x: value.location.x, width: width)
+						if grab_offset == nil {
+							let start_time = self.time(x: value.startLocation.x, width: width)
+							let on_thumb = start_time >= editor.view_start && start_time <= editor.view_start + editor.view_length
+							grab_offset = on_thumb ? start_time - editor.view_start : editor.view_length / 2
+						}
+						editor.pan(to: time - (grab_offset ?? 0))
+					}
+					.onEnded { _ in grab_offset = nil }
 			)
-			context.fill(Path(roundedRect: visible, cornerRadius: 1.5), with: .color(.secondary.opacity(0.7)))
 		}
+		.frame(height: 14)
+		.help("Drag to scroll the waveform")
+	}
+
+	private func time(x: Double, width: Double) -> Double {
+		width > 0 ? min(max(x / width, 0), 1) * editor.duration : 0
+	}
+
+	private func draw(in context: inout GraphicsContext, size: CGSize) {
+		guard editor.duration > 0 else {
+			return
+		}
+		let scale = size.width / editor.duration
+		let track = CGRect(x: 0, y: 4, width: size.width, height: size.height - 8)
+		context.fill(Path(roundedRect: track, cornerRadius: 3), with: .color(.secondary.opacity(0.15)))
+		let thumb = CGRect(x: editor.view_start * scale, y: 2, width: max(8, editor.view_length * scale), height: size.height - 4)
+		context.fill(Path(roundedRect: thumb, cornerRadius: 4), with: .color(.secondary.opacity(editor.is_zoomed ? 0.45 : 0.2)))
+		for cut in editor.cuts {
+			context.fill(Path(CGRect(x: cut * scale - 1, y: 0, width: 2, height: size.height)), with: .color(.orange))
+		}
+		context.fill(Path(CGRect(x: editor.playhead * scale - 1, y: 0, width: 2, height: size.height)), with: .color(.red))
 	}
 }
 
