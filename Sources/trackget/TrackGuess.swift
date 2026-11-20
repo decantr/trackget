@@ -106,3 +106,26 @@ func guessPart(chapterTitle chapter_title: String, artist: String) -> TrackGuess
 	let title = chapter_title.replacing(/^\s*\d{1,3}\s*[.):-]\s+/, with: "")
 	return guessTrack(videoTitle: title, uploader: artist)
 }
+
+// Splits "Foreplay / Long Time" into its songs, but keeps "24/7" whole
+func splitTitle(_ title: String) -> [String] {
+	let characters = Array(title)
+	var names: [String] = []
+	var current = ""
+	for (index, character) in characters.enumerated() {
+		if character == "/" && !isBetweenDigits(characters, index) {
+			names.append(current)
+			current = ""
+		} else {
+			current.append(character)
+		}
+	}
+	names.append(current)
+	return names.map(collapseSpaces).filter { !$0.isEmpty }
+}
+
+private func isBetweenDigits(_ characters: [Character], _ index: Int) -> Bool {
+	let before = characters[..<index].last { $0 != " " }
+	let after = characters[(index + 1)...].first { $0 != " " }
+	return before?.isNumber == true && after?.isNumber == true
+}

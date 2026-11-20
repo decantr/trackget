@@ -36,7 +36,7 @@ struct ContentView: View {
 					}
 				}
 
-				if model.parts.count > 1 {
+				if !model.title.isEmpty || !model.parts.isEmpty {
 					partsSection
 				}
 
@@ -110,29 +110,45 @@ struct ContentView: View {
 
 	private var partsSection: some View {
 		Section {
-			Toggle("Split into \(model.parts.count) tracks by chapter", isOn: $model.split_parts)
+			Toggle(
+				model.chapter_count > 1 ? "Split into \(model.chapter_count) tracks by chapter" : "Split into tracks",
+				isOn: Binding(get: { model.split_parts }, set: { model.setSplit($0) })
+			)
 			if model.split_parts {
 				ForEach($model.parts) { $part in
 					HStack {
 						Toggle("Include", isOn: $part.include)
 							.labelsHidden()
-						Text(part.time_range)
+						TextField("Start", text: $part.start_text, prompt: Text("m:ss"))
+							.labelsHidden()
 							.monospacedDigit()
-							.foregroundStyle(.secondary)
-							.frame(width: 96, alignment: .leading)
+							.frame(width: 64)
+							.foregroundStyle(part.start == nil ? .red : .primary)
 						TextField("Title", text: $part.title, prompt: Text("Title"))
 							.labelsHidden()
 							.disabled(!part.include)
 						TextField("Artist", text: $part.artist, prompt: Text("Artist"))
 							.labelsHidden()
 							.disabled(!part.include)
+						Button("Remove part", systemImage: "minus.circle") {
+							model.removePart(part.id)
+						}
+						.labelStyle(.iconOnly)
+						.buttonStyle(.borderless)
+						.disabled(model.parts.count <= 2)
 					}
 				}
+				Button("Add part", systemImage: "plus.circle") { model.addPart() }
+					.buttonStyle(.borderless)
 			}
 		} footer: {
 			if model.split_parts {
-				Text("Title and Artist above become the album and album artist, unless More details sets them.")
-					.foregroundStyle(.secondary)
+				Text(
+					model.parts_valid
+						? "Album: \(model.parts_album) by \(model.parts_album_artist)"
+						: "Start times must be m:ss, in order"
+				)
+				.foregroundStyle(model.parts_valid ? .secondary : Color.red)
 			}
 		}
 	}

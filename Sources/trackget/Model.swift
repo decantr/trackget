@@ -27,6 +27,7 @@ final class Model {
 	var track_number = ""
 	var parts: [Part] = []
 	var split_parts = false
+	var chapter_count = 0
 
 	var busy = false
 	var progress: Double?
@@ -50,9 +51,46 @@ final class Model {
 		}
 		if split_parts {
 			let included = parts.filter(\.include)
-			return !included.isEmpty && included.allSatisfy { !trimmed($0.title).isEmpty && !trimmed($0.artist).isEmpty }
+			return parts_valid && !included.isEmpty && included.allSatisfy { !trimmed($0.title).isEmpty && !trimmed($0.artist).isEmpty }
 		}
 		return true
+	}
+
+	var parts_valid: Bool {
+		let starts = parts.compactMap(\.start)
+		return starts.count == parts.count && zip(starts, starts.dropFirst()).allSatisfy { $0 < $1 }
+	}
+
+	// Split parts belong to the release that the main Title and Artist name
+	var parts_album: String { trimmed(album).isEmpty ? trimmed(title) : trimmed(album) }
+	var parts_album_artist: String { trimmed(album_artist).isEmpty ? trimmed(artist) : trimmed(album_artist) }
+
+	func setSplit(_ is_on: Bool) {
+		split_parts = is_on
+		guard is_on, parts.isEmpty else {
+			return
+		}
+		var names = splitTitle(title)
+		if names.count < 2 {
+			names = [title, ""]
+		}
+		let featured = artists.split(separator: ";").map { trimmed(String($0)) }.dropFirst()
+		parts = names.enumerated().map { index, name in
+			Part(
+				start_text: index == 0 ? "0:00" : "",
+				title: name,
+				artist: artist,
+				featured: name.contains(/(?i)\bfeat\./) ? Array(featured) : []
+			)
+		}
+	}
+
+	func addPart() {
+		parts.append(Part(start_text: "", title: "", artist: artist))
+	}
+
+	func removePart(_ id: Part.ID) {
+		parts.removeAll { $0.id == id }
 	}
 
 	private func clearTrack() {
@@ -66,6 +104,7 @@ final class Model {
 		track_number = ""
 		parts = []
 		split_parts = false
+		chapter_count = 0
 		saved_file = nil
 		status = ""
 	}
@@ -196,13 +235,15 @@ final class Model {
 			self.artists = guess.artists.joined(separator: "; ")
 			self.album = fields["album"] ?? ""
 			self.year = fields["year"] ?? ""
-			self.parts = decodeChapters(fields["chapters"] ?? "").map { chapter in
+			let chapters = decodeChapters(fields["chapters"] ?? "")
+			self.chapter_count = chapters.count
+			self.parts = chapters.count < 2 ? [] : chapters.map { chapter in
 				let part = guessPart(chapterTitle: chapter.title ?? "", artist: guess.artist)
-				return Part(chapter: chapter, title: part.title, artist: part.artist, featured: part.featured)
+				return Part(start_text: clockTime(chapter.start_time), title: part.title, artist: part.artist, featured: part.featured)
 			}
 			self.split_parts = false
 			self.status = "Found \"\(self.artist) - \(self.title)\""
-				+ (self.parts.count > 1 ? ", \(self.parts.count) chapters" : "")
+				+ (chapters.count > 1 ? ", \(chapters.count) chapters" : "")
 		}
 	}
 
@@ -213,13 +254,13 @@ final class Model {
 				.appendingPathComponent("trackget-\(UUID().uuidString)", isDirectory: true)
 			defer { try? FileManager.default.removeItem(at: temp_dir) }
 
-			let (source, chapters) = try await self.fetchAudio(into: temp_dir, format: format, remove_non_music: remove_non_music)
+			let (source, removed) = try await self.fetchAudio(into: temp_dir, format: format, remove_non_music: remove_non_music)
 			self.status = "Tagging…"
 			self.progress = nil
 			try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
 
 			if self.split_parts {
-				try await self.saveParts(from: source, chapters: chapters, to: folder)
+				try await self.saveParts(from: source, removed: removed, to: folder)
 				return
 			}
 			let target = uniqueFile(in: folder, name: "\(trimmed(self.artist)) - \(trimmed(self.title))", ext: source.pathExtension)
@@ -229,18 +270,22 @@ final class Model {
 		}
 	}
 
-	private func saveParts(from source: URL, chapters: [Chapter], to folder: URL) async throws {
-		let included = parts.filter(\.include)
-		let downloaded = matchChapters(included.map(\.chapter), in: chapters.isEmpty ? included.map(\.chapter) : chapters)
+	private func saveParts(from source: URL, removed: [Chapter], to folder: URL) async throws {
+		let starts = parts.compactMap(\.start)
+		let included = parts.indices.filter { parts[$0].include }
 		var saved = 0
-		for (index, part) in included.enumerated() {
-			guard let chapter = downloaded[index] else {
-				appendLog("!! Skipped \"\(part.title)\": SponsorBlock removed its chapter")
+		for (number, index) in included.enumerated() {
+			let part = parts[index]
+			let start = shiftTime(starts[index], removed: removed)
+			let end = index + 1 < starts.count ? shiftTime(starts[index + 1], removed: removed) : nil
+			if let end, end - start < 1 {
+				appendLog("!! Skipped \"\(part.title)\": SponsorBlock removed all of it")
 				continue
 			}
-			status = "Saving part \(index + 1) of \(included.count)…"
+			status = "Saving part \(number + 1) of \(included.count)…"
 			let target = uniqueFile(in: folder, name: "\(trimmed(part.artist)) - \(trimmed(part.title))", ext: source.pathExtension)
-			try await writeTags(partTags(part, number: index + 1, of: included.count, ext: target.pathExtension), from: source, to: target, chapter: chapter)
+			let tags = partTags(part, number: number + 1, of: included.count, ext: target.pathExtension)
+			try await writeTags(tags, from: source, to: target, range: (start, end))
 			saved_file = target
 			saved += 1
 		}
@@ -260,14 +305,13 @@ final class Model {
 		]
 	}
 
-	// The main Title and Artist name the release that the parts come from
 	private func partTags(_ part: Part, number: Int, of count: Int, ext: String) -> [(String, String)] {
 		[
 			("title", part.title),
 			("artist", part.artist),
 			("ARTISTS", ext == "m4a" ? "" : ([part.artist] + part.featured).joined(separator: "; ")),
-			("album", trimmed(album).isEmpty ? title : album),
-			("album_artist", trimmed(album_artist).isEmpty ? artist : album_artist),
+			("album", parts_album),
+			("album_artist", parts_album_artist),
 			("date", year),
 			("genre", genre),
 			("track", "\(number)/\(count)"),
@@ -276,12 +320,12 @@ final class Model {
 
 	private func fetchAudio(into temp_dir: URL, format: AudioFormat, remove_non_music: Bool) async throws -> (URL, [Chapter]) {
 		var file_path: String?
-		var chapters: [Chapter] = []
+		var removed: [Chapter] = []
 		var arguments = [
 			"--no-playlist", "--newline", "--progress", "--no-simulate",
 			"--progress-template", "download:[progress] %(progress._percent_str)s",
 			"--print", "after_move:[file] %(filepath)s",
-			"--print", "after_move:[chapters] %(chapters)j",
+			"--print", "after_move:[removed] %(sponsorblock_chapters)j",
 			"-x", "--audio-format", format.rawValue, "--audio-quality", "0",
 			"--embed-thumbnail", "--convert-thumbnails", "jpg",
 			"-P", temp_dir.path,
@@ -301,8 +345,8 @@ final class Model {
 				}
 			} else if line.hasPrefix("[file] ") {
 				file_path = String(line.dropFirst(7))
-			} else if line.hasPrefix("[chapters] ") {
-				chapters = decodeChapters(String(line.dropFirst(11)))
+			} else if line.hasPrefix("[removed] ") {
+				removed = decodeChapters(String(line.dropFirst(10)))
 			} else {
 				self.appendLog(line)
 			}
@@ -311,19 +355,22 @@ final class Model {
 		guard status == 0, let file_path else {
 			throw ShellError(message: "yt-dlp failed, see log")
 		}
-		return (URL(fileURLWithPath: file_path), chapters)
+		return (URL(fileURLWithPath: file_path), removed)
 	}
 
 	// ffmpeg takes tag values as plain arguments, which avoids yt-dlp's --parse-metadata escaping rules
-	private func writeTags(_ tags: [(String, String)], from source: URL, to target: URL, chapter: Chapter? = nil) async throws {
+	private func writeTags(_ tags: [(String, String)], from source: URL, to target: URL, range: (Double, Double?)? = nil) async throws {
 		var arguments = ["-nostdin", "-y", "-v", "error"]
 		// Seeking on the input keeps the cover art stream, which starts at zero
-		if let chapter {
-			arguments += ["-ss", String(format: "%.3f", chapter.start_time), "-to", String(format: "%.3f", chapter.end_time)]
+		if let (start, end) = range {
+			arguments += ["-ss", String(format: "%.3f", start)]
+			if let end {
+				arguments += ["-to", String(format: "%.3f", end)]
+			}
 		}
 		arguments += ["-i", source.path, "-map", "0", "-c", "copy"]
 		// A copied flac stream keeps the full-length header; flac to flac is lossless
-		if chapter != nil && target.pathExtension == "flac" {
+		if range != nil && target.pathExtension == "flac" {
 			arguments += ["-c:a", "flac"]
 		}
 		for (key, value) in tags where !trimmed(value).isEmpty {

@@ -11,25 +11,24 @@ struct PartTests {
 		#expect(decodeChapters("").isEmpty)
 	}
 
-	@Test func matchesShiftedChapters() {
-		let looked_up = [
-			Chapter(start_time: 0, end_time: 10, title: "Intro"),
-			Chapter(start_time: 10, end_time: 100, title: "Song A"),
-			Chapter(start_time: 100, end_time: 200, title: "Song B"),
+	@Test(arguments: [(2.0, 0.0), (10.0, 6.0), (100.0, 96.0), (150.0, 116.0), (300.0, 256.0)])
+	func shiftsTimeAfterRemovedSegments(time: Double, expected: Double) {
+		let removed = [
+			Chapter(start_time: 0, end_time: 4, title: nil),
+			Chapter(start_time: 120, end_time: 160, title: nil),
+			Chapter(start_time: 130, end_time: 140, title: nil),
 		]
-		let downloaded = [
-			Chapter(start_time: 0, end_time: 90, title: "Song A"),
-			Chapter(start_time: 90, end_time: 190, title: "Song B"),
-		]
-		#expect(matchChapters(looked_up, in: downloaded) == [nil, downloaded[0], downloaded[1]])
+		#expect(shiftTime(time, removed: removed) == expected)
 	}
 
-	@Test func matchesRepeatedTitlesInOrder() {
-		let chapters = [
-			Chapter(start_time: 0, end_time: 10, title: "Interlude"),
-			Chapter(start_time: 10, end_time: 20, title: "Interlude"),
-		]
-		#expect(matchChapters(chapters, in: chapters) == chapters)
+	@Test(arguments: [("0:00", 0.0), ("2:28", 148.0), ("1:02:05", 3725.0), ("95", 95.0), ("2:28.5", 148.5)])
+	func parsesClock(text: String, expected: Double) {
+		#expect(parseClock(text) == expected)
+	}
+
+	@Test(arguments: ["", "2:", "a:10", "1:2:3:4", "-5"])
+	func rejectsBadClock(text: String) {
+		#expect(parseClock(text) == nil)
 	}
 
 	@Test(arguments: [(5.0, "0:05"), (65.4, "1:05"), (3725.0, "1:02:05")])
@@ -40,5 +39,17 @@ struct PartTests {
 	@Test func guessesPartFromNumberedChapter() {
 		#expect(guessPart(chapterTitle: "2. Be My Baby", artist: "Eddie Money") == TrackGuess(artist: "Eddie Money", title: "Be My Baby"))
 		#expect(guessPart(chapterTitle: "Ronnie Spector - Be My Baby", artist: "Eddie Money") == TrackGuess(artist: "Ronnie Spector", title: "Be My Baby"))
+	}
+}
+
+struct SplitTitleTests {
+	@Test(arguments: [
+		("Foreplay / Long Time", ["Foreplay", "Long Time"]),
+		("Take Me Home Tonight/Be My Baby (feat. Ronnie Spector)", ["Take Me Home Tonight", "Be My Baby (feat. Ronnie Spector)"]),
+		("24/7", ["24/7"]),
+		("Midnight City", ["Midnight City"]),
+	])
+	func splitsTitle(title: String, expected: [String]) {
+		#expect(splitTitle(title) == expected)
 	}
 }

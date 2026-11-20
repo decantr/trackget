@@ -8,29 +8,47 @@ struct Chapter: Decodable, Equatable {
 
 struct Part: Identifiable {
 	let id = UUID()
-	let chapter: Chapter
 	var include = true
+	var start_text: String
 	var title: String
 	var artist: String
-	var featured: [String]
+	var featured: [String] = []
 
-	var time_range: String { "\(clockTime(chapter.start_time))–\(clockTime(chapter.end_time))" }
+	var start: Double? { parseClock(start_text) }
 }
 
 func decodeChapters(_ json: String) -> [Chapter] {
 	(try? JSONDecoder().decode([Chapter].self, from: Data(json.utf8))) ?? []
 }
 
-// SponsorBlock removal shifts chapter times, so look-up chapters are matched by title to the downloaded ones
-func matchChapters(_ parts: [Chapter], in downloaded: [Chapter]) -> [Chapter?] {
-	var remaining = downloaded[...]
-	return parts.map { part in
-		guard let index = remaining.firstIndex(where: { $0.title == part.title }) else {
+// Part times come from the original video; SponsorBlock removal moves everything after a cut earlier
+func shiftTime(_ time: Double, removed: [Chapter]) -> Double {
+	var cut = 0.0
+	var covered_to = 0.0
+	for segment in removed.sorted(by: { $0.start_time < $1.start_time }) {
+		let start = max(segment.start_time, covered_to)
+		let end = min(segment.end_time, time)
+		if end > start {
+			cut += end - start
+		}
+		covered_to = max(covered_to, segment.end_time)
+	}
+	return time - cut
+}
+
+func parseClock(_ text: String) -> Double? {
+	let fields = text.trimmingCharacters(in: .whitespaces).split(separator: ":", omittingEmptySubsequences: false)
+	guard (1...3).contains(fields.count) else {
+		return nil
+	}
+	var seconds = 0.0
+	for field in fields {
+		guard let value = Double(field), value >= 0 else {
 			return nil
 		}
-		remaining = remaining[(index + 1)...]
-		return downloaded[index]
+		seconds = seconds * 60 + value
 	}
+	return seconds
 }
 
 func clockTime(_ seconds: Double) -> String {
