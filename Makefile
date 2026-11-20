@@ -6,7 +6,7 @@ VERSION ?= $(shell git describe --tags --abbrev=0 2>/dev/null | sed 's/^v//')
 # Swift Testing ships with Xcode, not the Command Line Tools
 XCODE_DIR = $(shell [ -d /Applications/Xcode.app ] && echo /Applications/Xcode.app/Contents/Developer)
 
-.PHONY: bootstrap build test lint icon app zip run install clean
+.PHONY: bootstrap build test lint icon app zip run install deploy clean
 
 bootstrap:
 	mise install
@@ -50,6 +50,12 @@ run: app
 install: app
 	rm -rf /Applications/TrackGet.app
 	cp -R $(APP) /Applications/
+
+# Usage: make deploy HOST=foo (any ssh host); scp adds no quarantine flag, so Gatekeeper allows the ad-hoc signature
+deploy: zip
+	@test -n "$(HOST)" || { echo "!! set HOST, for example: make deploy HOST=foo"; exit 1; }
+	scp $(ZIP) $(HOST):/tmp/TrackGet.zip
+	ssh $(HOST) 'rm -rf /Applications/TrackGet.app && ditto -x -k /tmp/TrackGet.zip /Applications && rm /tmp/TrackGet.zip'
 
 clean:
 	rm -rf .build build

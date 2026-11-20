@@ -10,6 +10,7 @@ Needs the Xcode Command Line Tools (Swift 6) and macOS 14 or later.
 make app      # build build/TrackGet.app
 make run      # build and open
 make install  # copy to /Applications
+make deploy HOST=foo  # build and install on another Mac over ssh
 ```
 
 ## Tools
