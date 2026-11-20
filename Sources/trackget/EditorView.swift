@@ -4,6 +4,7 @@ import UniformTypeIdentifiers
 
 struct EditorView: View {
 	@Bindable var editor: Editor
+	@State private var drop_targeted = false
 	@AppStorage("output_folder") private var output_folder = defaultFolder().path
 
 	var body: some View {
@@ -16,6 +17,12 @@ struct EditorView: View {
 				} actions: {
 					Button("Open…", action: openFile)
 						.disabled(editor.busy)
+				}
+				.frame(maxWidth: .infinity, maxHeight: .infinity)
+				.background {
+					RoundedRectangle(cornerRadius: 12)
+						.strokeBorder(.secondary.opacity(0.5), style: StrokeStyle(lineWidth: 2, dash: [8, 6]))
+						.padding(16)
 				}
 			} else {
 				Form {
@@ -49,12 +56,25 @@ struct EditorView: View {
 			}
 			footer
 		}
+		.frame(maxWidth: .infinity, maxHeight: .infinity)
+		.contentShape(Rectangle())
 		.dropDestination(for: URL.self) { urls, _ in
 			guard let url = urls.first, isAudio(url) else {
 				return false
 			}
 			Task { await editor.open(url) }
 			return true
+		} isTargeted: { targeted in
+			drop_targeted = targeted
+		}
+		.overlay {
+			if drop_targeted {
+				RoundedRectangle(cornerRadius: 12)
+					.strokeBorder(Color.accentColor, style: StrokeStyle(lineWidth: 3, dash: [8, 6]))
+					.background(Color.accentColor.opacity(0.08), in: RoundedRectangle(cornerRadius: 12))
+					.padding(8)
+					.allowsHitTesting(false)
+			}
 		}
 	}
 
@@ -81,22 +101,26 @@ struct EditorView: View {
 
 	private var partsSection: some View {
 		Section {
-			ForEach(Array($editor.parts.enumerated()), id: \.element.id) { index, $part in
+			ForEach(editor.parts) { part in
+				let index = editor.parts.firstIndex { $0.id == part.id } ?? 0
+				let range = editor.boundaries.indices.contains(index + 1) ? "\(clockTime(editor.boundaries[index]))–\(clockTime(editor.boundaries[index + 1]))" : ""
 				HStack {
-					Toggle("Include", isOn: $part.include)
+					Toggle("Include", isOn: partBinding(part.id).include)
 						.labelsHidden()
-					Text("\(clockTime(editor.boundaries[index]))–\(clockTime(editor.boundaries[index + 1]))")
+					Text(range)
 						.monospacedDigit()
 						.foregroundStyle(.secondary)
 						.frame(width: 96, alignment: .leading)
-					TextField("Title", text: $part.title, prompt: Text("Title"))
+					TextField("Title", text: partBinding(part.id).title, prompt: Text("Title"))
 						.labelsHidden()
 						.disabled(!part.include)
-					TextField("Artist", text: $part.artist, prompt: Text("Artist"))
+					TextField("Artist", text: partBinding(part.id).artist, prompt: Text("Artist"))
 						.labelsHidden()
 						.disabled(!part.include)
 					Button("Join with the part before", systemImage: "minus.circle") {
-						editor.merge(index)
+						if let index = editor.parts.firstIndex(where: { $0.id == part.id }) {
+							editor.merge(index)
+						}
 					}
 					.labelStyle(.iconOnly)
 					.buttonStyle(.borderless)
@@ -109,6 +133,18 @@ struct EditorView: View {
 			Text("Album: \(editor.parts_album) by \(editor.parts_album_artist)")
 				.foregroundStyle(.secondary)
 		}
+	}
+
+	// Rows look parts up by id, because a row can still render once while a new file replaces the parts
+	private func partBinding(_ id: EditPart.ID) -> Binding<EditPart> {
+		Binding(
+			get: { editor.parts.first { $0.id == id } ?? EditPart(title: "", artist: "") },
+			set: { part in
+				if let index = editor.parts.firstIndex(where: { $0.id == id }) {
+					editor.parts[index] = part
+				}
+			}
+		)
 	}
 
 	private var footer: some View {

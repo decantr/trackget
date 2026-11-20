@@ -157,7 +157,7 @@ final class Editor {
 		case .playhead: playhead
 		case .start: trim_start
 		case .end: trim_end
-		case .cut(let index): cuts[index]
+		case .cut(let index): cuts.indices.contains(index) ? cuts[index] : 0
 		}
 	}
 
@@ -173,6 +173,9 @@ final class Editor {
 		case .end:
 			trim_end = max(min(time, duration), points[points.count - 2] + gap)
 		case .cut(let index):
+			guard cuts.indices.contains(index) else {
+				return
+			}
 			cuts[index] = min(max(time, points[index] + gap), points[index + 2] - gap)
 		}
 	}
