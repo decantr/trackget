@@ -314,7 +314,7 @@ final class Model {
 			("album_artist", parts_album_artist),
 			("date", year),
 			("genre", genre),
-			("track", "\(number)/\(count)"),
+			("track", part.track.isEmpty ? "\(number)/\(count)" : part.track),
 		]
 	}
 

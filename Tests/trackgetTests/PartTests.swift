@@ -36,6 +36,11 @@ struct PartTests {
 		#expect(clockTime(seconds) == expected)
 	}
 
+	@Test func numbersIncludedParts() {
+		#expect(defaultTrackNumbers([true, false, true, true]) == ["1/3", "", "2/3", "3/3"])
+		#expect(defaultTrackNumbers([false]) == [""])
+	}
+
 	@Test func guessesPartFromNumberedChapter() {
 		#expect(guessPart(chapterTitle: "2. Be My Baby", artist: "Eddie Money") == TrackGuess(artist: "Eddie Money", title: "Be My Baby"))
 		#expect(guessPart(chapterTitle: "Ronnie Spector - Be My Baby", artist: "Eddie Money") == TrackGuess(artist: "Ronnie Spector", title: "Be My Baby"))

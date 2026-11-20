@@ -7,6 +7,7 @@ struct EditPart: Identifiable {
 	var include = true
 	var title: String
 	var artist: String
+	var track = ""
 }
 
 enum Marker: Equatable {
@@ -29,6 +30,7 @@ final class Editor {
 	var artist = ""
 	var album = ""
 	var album_artist = ""
+	var track_number = ""
 	var trim_start = 0.0
 	var trim_end = 0.0
 	var cuts: [Double] = []
@@ -82,6 +84,7 @@ final class Editor {
 			artist = info.tags["artist"] ?? ""
 			album = info.tags["album"] ?? ""
 			album_artist = info.tags["album_artist"] ?? ""
+			track_number = info.tags["track"] ?? ""
 			trim_start = 0
 			trim_end = duration
 			view_start = 0
@@ -371,14 +374,14 @@ final class Editor {
 
 	private func tags(for part: EditPart, number: Int, of count: Int, ext: String) -> [(String, String)] {
 		guard is_split else {
-			return [("title", title), ("artist", artist), ("album", album), ("album_artist", album_artist)]
+			return [("title", title), ("artist", artist), ("album", album), ("album_artist", album_artist), ("track", track_number)]
 		}
 		var tags = [
 			("title", part.title),
 			("artist", part.artist),
 			("album", parts_album),
 			("album_artist", parts_album_artist),
-			("track", "\(number)/\(count)"),
+			("track", part.track.isEmpty ? "\(number)/\(count)" : part.track),
 		]
 		// The source's ARTISTS lists every artist in the whole file, which is wrong for one part
 		if ext != "m4a" {

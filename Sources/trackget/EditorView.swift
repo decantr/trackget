@@ -49,6 +49,9 @@ struct EditorView: View {
 						TextField("Artist", text: $editor.artist)
 						TextField("Album", text: $editor.album)
 						TextField("Album artist", text: $editor.album_artist)
+						if !editor.is_split {
+							TextField("Track number", text: $editor.track_number)
+						}
 					}
 
 					if editor.is_split {
@@ -141,6 +144,12 @@ struct EditorView: View {
 						.monospacedDigit()
 						.foregroundStyle(.secondary)
 						.frame(width: 96, alignment: .leading)
+					TextField("Track", text: partBinding(part.id).track, prompt: Text(defaultTrackNumbers(editor.parts.map(\.include))[index]))
+						.labelsHidden()
+						.monospacedDigit()
+						.frame(width: 44)
+						.disabled(!part.include)
+						.help("Track number, such as 3 or 3/9")
 					TextField("Title", text: partBinding(part.id).title, prompt: Text("Title"))
 						.labelsHidden()
 						.disabled(!part.include)

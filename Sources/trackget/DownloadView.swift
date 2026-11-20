@@ -86,6 +86,7 @@ struct DownloadView: View {
 			)
 			if model.split_parts {
 				ForEach($model.parts) { $part in
+					let index = model.parts.firstIndex { $0.id == part.id } ?? 0
 					HStack {
 						Toggle("Include", isOn: $part.include)
 							.labelsHidden()
@@ -94,6 +95,12 @@ struct DownloadView: View {
 							.monospacedDigit()
 							.frame(width: 64)
 							.foregroundStyle(part.start == nil ? .red : .primary)
+						TextField("Track", text: $part.track, prompt: Text(defaultTrackNumbers(model.parts.map(\.include))[index]))
+							.labelsHidden()
+							.monospacedDigit()
+							.frame(width: 44)
+							.disabled(!part.include)
+							.help("Track number, such as 3 or 3/9")
 						TextField("Title", text: $part.title, prompt: Text("Title"))
 							.labelsHidden()
 							.disabled(!part.include)

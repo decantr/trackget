@@ -13,8 +13,22 @@ struct Part: Identifiable {
 	var title: String
 	var artist: String
 	var featured: [String] = []
+	var track = ""
 
 	var start: Double? { parseClock(start_text) }
+}
+
+// Split parts without their own track number count through the included parts, such as 2/3
+func defaultTrackNumbers(_ included: [Bool]) -> [String] {
+	let count = included.filter { $0 }.count
+	var number = 0
+	return included.map { is_included in
+		guard is_included else {
+			return ""
+		}
+		number += 1
+		return "\(number)/\(count)"
+	}
 }
 
 func decodeChapters(_ json: String) -> [Chapter] {
