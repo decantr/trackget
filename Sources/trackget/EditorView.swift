@@ -89,6 +89,15 @@ struct EditorView: View {
 				.monospacedDigit()
 				.foregroundStyle(.secondary)
 			Spacer()
+			ControlGroup {
+				Button("Zoom Out", systemImage: "minus.magnifyingglass") { editor.zoomAroundPlayhead(by: 0.5) }
+					.keyboardShortcut("-", modifiers: .command)
+					.disabled(!editor.is_zoomed)
+				Button("Zoom In", systemImage: "plus.magnifyingglass") { editor.zoomAroundPlayhead(by: 2) }
+					.keyboardShortcut("=", modifiers: .command)
+					.disabled(editor.view_length <= Editor.shortest_view)
+			}
+			.fixedSize()
 			Button("Set Start", action: editor.setStart)
 				.help("Cut everything before the playhead")
 			Button("Set End", action: editor.setEnd)
@@ -188,6 +197,8 @@ private func isAudio(_ url: URL) -> Bool {
 struct WaveformView: View {
 	@Bindable var editor: Editor
 	@State private var dragging: Marker?
+	@State private var pinch_scale = 1.0
+	@State private var pointer = PointerState()
 	@FocusState private var focused: Bool
 
 	var body: some View {
@@ -207,6 +218,22 @@ struct WaveformView: View {
 					}
 					.onEnded { _ in dragging = nil }
 			)
+			.simultaneousGesture(
+				MagnifyGesture()
+					.onChanged { value in
+						editor.zoom(by: value.magnification / pinch_scale, around: time(x: value.startLocation.x, width: width))
+						pinch_scale = value.magnification
+					}
+					.onEnded { _ in pinch_scale = 1 }
+			)
+			.onContinuousHover { phase in
+				pointer.width = width
+				if case .active(let location) = phase {
+					pointer.x = location.x
+				} else {
+					pointer.x = nil
+				}
+			}
 		}
 		.frame(height: 140)
 		.focusable()
@@ -216,18 +243,20 @@ struct WaveformView: View {
 			editor.togglePlay()
 			return .handled
 		}
-		.help("Click to move the playhead, drag the handles to trim, space to play")
+		.onAppear { pointer.start(editor) }
+		.onDisappear { pointer.stop() }
+		.help("Click to move the playhead and drag the handles. Pinch or ⌘-scroll to zoom, swipe sideways to scroll, space to play.")
 	}
 
 	private func time(x: Double, width: Double) -> Double {
 		guard width > 0 else {
 			return 0
 		}
-		return min(max(x / width, 0), 1) * editor.duration
+		return editor.view_start + min(max(x / width, 0), 1) * editor.view_length
 	}
 
 	private func position(_ time: Double, width: Double) -> Double {
-		editor.duration > 0 ? time / editor.duration * width : 0
+		editor.view_length > 0 ? (time - editor.view_start) / editor.view_length * width : 0
 	}
 
 	// Grabs a marker within a few points of the click, otherwise the click moves the playhead
@@ -242,41 +271,104 @@ struct WaveformView: View {
 
 	private func draw(in context: inout GraphicsContext, size: CGSize) {
 		let width = size.width
-		let middle = size.height / 2
-		let start_x = position(editor.trim_start, width: width)
-		let end_x = position(editor.trim_end, width: width)
+		let wave_height = size.height - 8
+		let middle = wave_height / 2
 
 		context.fill(Path(roundedRect: CGRect(origin: .zero, size: size), cornerRadius: 6), with: .color(.secondary.opacity(0.08)))
 
+		// Each column shows the loudest peak in its time span, so detail survives at every zoom level
 		let peaks = editor.peaks
-		if !peaks.isEmpty {
-			let step = width / Double(peaks.count)
+		if !peaks.isEmpty && editor.duration > 0 {
+			let peaks_per_second = Double(peaks.count) / editor.duration
+			let column = 2.0
 			var inside = Path()
 			var outside = Path()
-			for (index, peak) in peaks.enumerated() {
-				let x = Double(index) * step
-				let height = max(1, Double(peak) * (size.height - 16))
-				let bar = CGRect(x: x, y: middle - height / 2, width: max(1, step - 0.5), height: height)
-				if x >= start_x && x <= end_x {
+			var x = 0.0
+			while x < width {
+				let from_time = time(x: x, width: width)
+				let first = min(Int(from_time * peaks_per_second), peaks.count - 1)
+				let last = min(max(first + 1, Int(time(x: x + column, width: width) * peaks_per_second)), peaks.count)
+				let peak = peaks[first..<last].max() ?? 0
+				let height = max(1, Double(peak) * (wave_height - 12))
+				let bar = CGRect(x: x, y: middle - height / 2, width: column - 0.5, height: height)
+				if from_time >= editor.trim_start && from_time <= editor.trim_end {
 					inside.addRect(bar)
 				} else {
 					outside.addRect(bar)
 				}
+				x += column
 			}
 			context.fill(outside, with: .color(.secondary.opacity(0.35)))
 			context.fill(inside, with: .color(.accentColor))
 		}
 
-		for x in [start_x, end_x] {
-			context.fill(Path(CGRect(x: x - 1, y: 0, width: 2, height: size.height)), with: .color(.primary))
+		for x in [position(editor.trim_start, width: width), position(editor.trim_end, width: width)] {
+			context.fill(Path(CGRect(x: x - 1, y: 0, width: 2, height: wave_height)), with: .color(.primary))
 			context.fill(Path(ellipseIn: CGRect(x: x - 5, y: 0, width: 10, height: 10)), with: .color(.primary))
 		}
 		for cut in editor.cuts {
 			let x = position(cut, width: width)
-			context.fill(Path(CGRect(x: x - 1, y: 0, width: 2, height: size.height)), with: .color(.orange))
-			context.fill(Path(ellipseIn: CGRect(x: x - 5, y: size.height - 10, width: 10, height: 10)), with: .color(.orange))
+			context.fill(Path(CGRect(x: x - 1, y: 0, width: 2, height: wave_height)), with: .color(.orange))
+			context.fill(Path(ellipseIn: CGRect(x: x - 5, y: wave_height - 10, width: 10, height: 10)), with: .color(.orange))
 		}
 		let playhead_x = position(editor.playhead, width: width)
-		context.fill(Path(CGRect(x: playhead_x - 0.75, y: 0, width: 1.5, height: size.height)), with: .color(.red))
+		context.fill(Path(CGRect(x: playhead_x - 0.75, y: 0, width: 1.5, height: wave_height)), with: .color(.red))
+
+		if editor.is_zoomed {
+			let track = CGRect(x: 0, y: size.height - 3, width: width, height: 3)
+			context.fill(Path(roundedRect: track, cornerRadius: 1.5), with: .color(.secondary.opacity(0.2)))
+			let visible = CGRect(
+				x: editor.view_start / editor.duration * width,
+				y: size.height - 3,
+				width: max(4, editor.view_length / editor.duration * width),
+				height: 3
+			)
+			context.fill(Path(roundedRect: visible, cornerRadius: 1.5), with: .color(.secondary.opacity(0.7)))
+		}
+	}
+}
+
+// SwiftUI has no scroll wheel events on macOS, so a local event monitor handles them while the pointer is over the waveform
+@MainActor
+final class PointerState {
+	var x: Double?
+	var width = 0.0
+	private var monitor: Any?
+
+	func start(_ editor: Editor) {
+		stop()
+		monitor = NSEvent.addLocalMonitorForEvents(matching: .scrollWheel) { [weak self] event in
+			let delta_x = Double(event.scrollingDeltaX)
+			let delta_y = Double(event.scrollingDeltaY)
+			let zooming = event.modifierFlags.contains(.command)
+			let handled = MainActor.assumeIsolated {
+				self?.scroll(editor, delta_x: delta_x, delta_y: delta_y, zooming: zooming) ?? false
+			}
+			return handled ? nil : event
+		}
+	}
+
+	private func scroll(_ editor: Editor, delta_x: Double, delta_y: Double, zooming: Bool) -> Bool {
+		guard let x, width > 0, editor.view_length > 0 else {
+			return false
+		}
+		let seconds_per_point = editor.view_length / width
+		if zooming {
+			editor.zoom(by: exp(delta_y * 0.01), around: editor.view_start + x * seconds_per_point)
+			return true
+		}
+		// Vertical scrolling without ⌘ still scrolls the page
+		guard abs(delta_x) > abs(delta_y) else {
+			return false
+		}
+		editor.pan(to: editor.view_start - delta_x * seconds_per_point)
+		return true
+	}
+
+	func stop() {
+		if let monitor {
+			NSEvent.removeMonitor(monitor)
+		}
+		monitor = nil
 	}
 }

@@ -19,7 +19,8 @@ enum Marker: Equatable {
 @MainActor
 @Observable
 final class Editor {
-	static let peak_count = 1500
+	static let peaks_per_second = 50.0
+	static let shortest_view = 2.0
 
 	var file: URL?
 	var duration = 0.0
@@ -33,6 +34,8 @@ final class Editor {
 	var cuts: [Double] = []
 	var parts: [EditPart] = []
 	var playhead = 0.0
+	var view_start = 0.0
+	var view_length = 0.0
 	var playing = false
 	var busy = false
 	var status = ""
@@ -77,12 +80,14 @@ final class Editor {
 			album_artist = info.tags["album_artist"] ?? ""
 			trim_start = 0
 			trim_end = duration
+			view_start = 0
+			view_length = duration
 			cuts = []
 			parts = [EditPart(title: title, artist: artist)]
 			playhead = 0
 			peaks = []
 			player = try await makePlayer(url)
-			peaks = try await loadPeaks(url, duration: duration, count: Self.peak_count)
+			peaks = try await loadPeaks(url, duration: duration, count: max(1, Int(duration * Self.peaks_per_second)))
 			status = "\(url.lastPathComponent), \(clockTime(duration))"
 		} catch {
 			status = error.localizedDescription
@@ -131,6 +136,9 @@ final class Editor {
 		ticker = Task { [weak self] in
 			while let self, self.playing, let player = self.player {
 				self.playhead = player.currentTime
+				if self.playhead > self.view_start + self.view_length {
+					self.view_start = min(self.playhead, self.duration - self.view_length)
+				}
 				if !player.isPlaying || player.currentTime >= self.trim_end {
 					self.stop()
 					break
@@ -145,6 +153,28 @@ final class Editor {
 		playing = false
 		ticker?.cancel()
 		ticker = nil
+	}
+
+	var is_zoomed: Bool { view_length < duration }
+
+	// Keeps the time under the pointer in the same place on screen
+	func zoom(by factor: Double, around time: Double) {
+		guard duration > 0 else {
+			return
+		}
+		let length = min(max(view_length / factor, min(Self.shortest_view, duration)), duration)
+		let fraction = view_length > 0 ? (time - view_start) / view_length : 0.5
+		view_length = length
+		pan(to: time - fraction * length)
+	}
+
+	func zoomAroundPlayhead(by factor: Double) {
+		let visible = playhead >= view_start && playhead <= view_start + view_length
+		zoom(by: factor, around: visible ? playhead : view_start + view_length / 2)
+	}
+
+	func pan(to start: Double) {
+		view_start = min(max(start, 0), max(0, duration - view_length))
 	}
 
 	func seek(_ time: Double) {

@@ -96,3 +96,40 @@ struct EditorTests {
 		editor.close()
 	}
 }
+
+@MainActor
+struct EditorZoomTests {
+	private func editor() -> Editor {
+		let editor = Editor()
+		editor.duration = 100
+		editor.trim_end = 100
+		editor.view_length = 100
+		return editor
+	}
+
+	@Test func zoomKeepsTimeUnderPointer() {
+		let editor = editor()
+		editor.zoom(by: 4, around: 50)
+		#expect(editor.view_length == 25)
+		#expect(editor.view_start == 37.5)
+	}
+
+	@Test func zoomStopsAtLimits() {
+		let editor = editor()
+		editor.zoom(by: 1000, around: 0)
+		#expect(editor.view_length == Editor.shortest_view)
+		#expect(editor.view_start == 0)
+		editor.zoom(by: 0.001, around: 0)
+		#expect(editor.view_length == 100)
+		#expect(!editor.is_zoomed)
+	}
+
+	@Test func panStaysInsideSong() {
+		let editor = editor()
+		editor.zoom(by: 4, around: 50)
+		editor.pan(to: 90)
+		#expect(editor.view_start == 75)
+		editor.pan(to: -10)
+		#expect(editor.view_start == 0)
+	}
+}
