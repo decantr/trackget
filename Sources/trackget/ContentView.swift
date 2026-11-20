@@ -7,6 +7,7 @@ struct ContentView: View {
 	@State private var show_log = false
 	@AppStorage("output_folder") private var output_folder = defaultFolder().path
 	@AppStorage("audio_format") private var audio_format = AudioFormat.mp3
+	@AppStorage("remove_non_music") private var remove_non_music = true
 
 	var body: some View {
 		VStack(spacing: 0) {
@@ -35,6 +36,10 @@ struct ContentView: View {
 					}
 				}
 
+				if model.parts.count > 1 {
+					partsSection
+				}
+
 				Section {
 					HStack {
 						LabeledContent("Folder") {
@@ -49,6 +54,8 @@ struct ContentView: View {
 							Text(format.rawValue).tag(format)
 						}
 					}
+					Toggle("Remove non-music parts", isOn: $remove_non_music)
+						.help("Cuts intros, skits and outros that SponsorBlock users have marked in music videos")
 				}
 
 				Section {
@@ -101,6 +108,35 @@ struct ContentView: View {
 		}
 	}
 
+	private var partsSection: some View {
+		Section {
+			Toggle("Split into \(model.parts.count) tracks by chapter", isOn: $model.split_parts)
+			if model.split_parts {
+				ForEach($model.parts) { $part in
+					HStack {
+						Toggle("Include", isOn: $part.include)
+							.labelsHidden()
+						Text(part.time_range)
+							.monospacedDigit()
+							.foregroundStyle(.secondary)
+							.frame(width: 96, alignment: .leading)
+						TextField("Title", text: $part.title, prompt: Text("Title"))
+							.labelsHidden()
+							.disabled(!part.include)
+						TextField("Artist", text: $part.artist, prompt: Text("Artist"))
+							.labelsHidden()
+							.disabled(!part.include)
+					}
+				}
+			}
+		} footer: {
+			if model.split_parts {
+				Text("Title and Artist above become the album and album artist, unless More details sets them.")
+					.foregroundStyle(.secondary)
+			}
+		}
+	}
+
 	private var footer: some View {
 		HStack(spacing: 12) {
 			if model.busy {
@@ -121,7 +157,7 @@ struct ContentView: View {
 				}
 			}
 			Button("Download") {
-				Task { await model.download(to: URL(fileURLWithPath: output_folder), format: audio_format) }
+				Task { await model.download(to: URL(fileURLWithPath: output_folder), format: audio_format, remove_non_music: remove_non_music) }
 			}
 			.keyboardShortcut(.defaultAction)
 			.disabled(!model.can_download)

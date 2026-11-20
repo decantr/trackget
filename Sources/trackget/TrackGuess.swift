@@ -101,3 +101,8 @@ private func stripQuotes(_ text: String) -> String {
 private func collapseSpaces(_ text: String) -> String {
 	text.replacing(/\s+/, with: " ").trimmingCharacters(in: .whitespaces)
 }
+
+func guessPart(chapterTitle chapter_title: String, artist: String) -> TrackGuess {
+	let title = chapter_title.replacing(/^\s*\d{1,3}\s*[.):-]\s+/, with: "")
+	return guessTrack(videoTitle: title, uploader: artist)
+}
