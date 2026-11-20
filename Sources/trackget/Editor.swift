@@ -32,6 +32,9 @@ final class Editor {
 	var trim_start = 0.0
 	var trim_end = 0.0
 	var cuts: [Double] = []
+	var chapters: [Chapter] = []
+	var non_music: [Span] = []
+	var silences: [Span] = []
 	var parts: [EditPart] = []
 	var playhead = 0.0
 	var view_start = 0.0
@@ -88,7 +91,11 @@ final class Editor {
 			playhead = 0
 			peaks = []
 			player = try await makePlayer(url)
+			setSuggestions(info.chapters)
+			silences = []
 			peaks = try await loadPeaks(url, duration: duration, count: max(1, Int(duration * Self.peaks_per_second)))
+			status = "Finding silence…"
+			silences = (try? await detectSilence(url)) ?? []
 			status = "\(url.lastPathComponent), \(clockTime(duration))"
 		} catch {
 			status = error.localizedDescription
@@ -246,6 +253,82 @@ final class Editor {
 		}
 		let new_title = index + 1 < names.count && parts.count < names.count ? names[index + 1] : ""
 		parts.insert(EditPart(title: new_title, artist: artist), at: index + 1)
+	}
+
+	// SponsorBlock marks arrive as chapters; the chapter yt-dlp adds for the rest of the video is not a song
+	private func setSuggestions(_ file_chapters: [Chapter]) {
+		let is_marked = { (chapter: Chapter) in chapter.title?.hasPrefix("[SponsorBlock]") == true }
+		non_music = file_chapters.filter(is_marked).map { Span(start: $0.start_time, end: $0.end_time) }
+		chapters = file_chapters.filter { !is_marked($0) }
+	}
+
+	var chapter_cuts: [Double] {
+		let edges = non_music.flatMap { [$0.start, $0.end] }
+		return chapters.map(\.start_time).filter { start in
+			start > trim_start + 0.5 && start < trim_end - 0.5 && !edges.contains { abs($0 - start) < 0.5 }
+		}
+	}
+
+	var silence_cuts: [Double] {
+		silences.filter { $0.start > trim_start + 0.5 && $0.end < trim_end - 0.5 }.map(\.middle)
+	}
+
+	var snap_points: [Double] {
+		chapters.map(\.start_time) + non_music.flatMap { [$0.start, $0.end] } + silences.flatMap { [$0.start, $0.middle, $0.end] }
+	}
+
+	func splitAtChapters() {
+		let cuts = chapter_cuts
+		let first = chapters.last { $0.start_time < (cuts.first ?? trim_end) - 0.5 }
+		let named = ([first] + chapters.filter { cuts.contains($0.start_time) }).map { chapter in
+			guessPart(chapterTitle: chapter?.title ?? "", artist: artist)
+		}
+		setCuts(cuts, names: named.map(\.title), artists: named.map { $0.artist.isEmpty ? artist : $0.artist })
+	}
+
+	func splitAtSilences() {
+		let cuts = silence_cuts
+		let names = splitTitle(title)
+		setCuts(cuts, names: names.count == cuts.count + 1 ? names : [], artists: [])
+	}
+
+	private func setCuts(_ new_cuts: [Double], names: [String], artists: [String]) {
+		cuts = new_cuts.sorted()
+		parts = (0...cuts.count).map { index in
+			EditPart(
+				title: index < names.count ? names[index] : "",
+				artist: index < artists.count ? artists[index] : artist
+			)
+		}
+		if parts.count == 1 {
+			parts[0].title = title
+		}
+	}
+
+	var can_trim_non_music: Bool {
+		non_music.contains { $0.start < 0.5 || $0.end > duration - 0.5 }
+	}
+
+	func trimNonMusic() {
+		trimTo(non_music)
+	}
+
+	var can_trim_silence: Bool {
+		silences.contains { $0.start < 0.5 || $0.end > duration - 0.5 }
+	}
+
+	func trimSilence() {
+		trimTo(silences)
+	}
+
+	// Only spans that touch the start or end of the file trim; ones in the middle are splits
+	private func trimTo(_ spans: [Span]) {
+		if let leading = spans.first(where: { $0.start < 0.5 }) {
+			move(.start, to: leading.end)
+		}
+		if let trailing = spans.last(where: { $0.end > duration - 0.5 }) {
+			move(.end, to: trailing.start)
+		}
 	}
 
 	// Removing the cut before a part merges that part into the one before it

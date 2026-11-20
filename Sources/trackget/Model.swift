@@ -328,6 +328,8 @@ final class Model {
 			"--print", "after_move:[removed] %(sponsorblock_chapters)j",
 			"-x", "--audio-format", format.rawValue, "--audio-quality", "0",
 			"--embed-thumbnail", "--convert-thumbnails", "jpg",
+			// Chapters and marked non-music sections become suggestions in the Edit tab
+			"--embed-chapters", "--sponsorblock-mark", "music_offtopic",
 			"-P", temp_dir.path,
 			"-o", "audio.%(ext)s",
 		]

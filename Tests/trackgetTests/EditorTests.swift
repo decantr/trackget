@@ -133,3 +133,54 @@ struct EditorZoomTests {
 		#expect(editor.view_start == 0)
 	}
 }
+
+@MainActor
+struct EditorSuggestionTests {
+	// 0–2 s non-music, Song A from 2 s, silence 10–12 s, Song B from 12 s, non-music 18–20 s
+	private func makeFile(in folder: URL) async throws -> URL {
+		let metadata = folder.appendingPathComponent("chapters.txt")
+		let chapters = [(0, 2000, "[SponsorBlock]: Non-Music Section"), (2000, 12000, "Song A"), (12000, 18000, "Song B"), (18000, 20000, "[SponsorBlock]: Non-Music Section")]
+		let text = ";FFMETADATA1\n" + chapters.map { "[CHAPTER]\nTIMEBASE=1/1000\nSTART=\($0.0)\nEND=\($0.1)\ntitle=\($0.2)\n" }.joined()
+		try text.write(to: metadata, atomically: true, encoding: .utf8)
+		// ffmpeg writes no chapters to flac, so the test uses mp3
+		let file = folder.appendingPathComponent("source.mp3")
+		let status = try await runProcess(Tools.path("ffmpeg"), [
+			"-v", "error",
+			"-f", "lavfi", "-i", "sine=d=10",
+			"-f", "lavfi", "-t", "2", "-i", "anullsrc=r=44100:cl=mono",
+			"-f", "lavfi", "-i", "sine=d=8",
+			"-i", metadata.path,
+			"-filter_complex", "[0][1][2]concat=n=3:v=0:a=1",
+			"-map_chapters", "3",
+			file.path,
+		])
+		#expect(status == 0)
+		return file
+	}
+
+	@Test(.enabled(if: FileManager.default.isExecutableFile(atPath: Tools.path("ffmpeg").path)))
+	func suggestsFromChaptersAndSilence() async throws {
+		let folder = FileManager.default.temporaryDirectory.appendingPathComponent("trackget-test-\(UUID().uuidString)")
+		try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+		defer { try? FileManager.default.removeItem(at: folder) }
+
+		let editor = Editor()
+		await editor.open(try await makeFile(in: folder))
+		editor.artist = "Boston"
+		#expect(editor.non_music == [Span(start: 0, end: 2), Span(start: 18, end: 20)])
+		#expect(editor.chapters.map(\.title) == ["Song A", "Song B"])
+		#expect(editor.silences.count == 1)
+		#expect(abs((editor.silence_cuts.first ?? 0) - 11) < 0.2)
+		#expect(editor.chapter_cuts == [12])
+
+		editor.splitAtChapters()
+		#expect(editor.cuts == [12])
+		#expect(editor.parts.map(\.title) == ["Song A", "Song B"])
+		#expect(editor.parts.map(\.artist) == ["Boston", "Boston"])
+
+		editor.trimNonMusic()
+		#expect(editor.trim_start == 2)
+		#expect(editor.trim_end == 18)
+		editor.close()
+	}
+}

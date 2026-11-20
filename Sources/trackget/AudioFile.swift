@@ -17,7 +17,11 @@ func writeAudio(
 			arguments += ["-to", String(format: "%.3f", end)]
 		}
 	}
-	arguments += ["-i", source.path, "-map", "0", "-c", "copy"]
+	// Only audio and cover art: m4a keeps chapters in a data stream that ffmpeg cannot copy back
+	arguments += ["-i", source.path, "-map", "0:a", "-map", "0:v?", "-c", "copy"]
+	if range != nil {
+		arguments += ["-map_chapters", "-1"]
+	}
 	// A copied flac stream keeps the full-length header; flac to flac is lossless
 	if range != nil && target.pathExtension == "flac" {
 		arguments += ["-c:a", "flac"]
@@ -43,6 +47,7 @@ func writeAudio(
 
 struct AudioInfo {
 	let duration: Double
+	let chapters: [Chapter]
 	// Keys are lowercase, because flac and opus store tags in upper case
 	let tags: [String: String]
 }
@@ -57,13 +62,19 @@ func readAudioInfo(_ file: URL) async throws -> AudioInfo {
 		struct Stream: Decodable {
 			let tags: [String: String]?
 		}
+		struct ProbeChapter: Decodable {
+			let start_time: String
+			let end_time: String
+			let tags: [String: String]?
+		}
 		let format: Format
 		let streams: [Stream]?
+		let chapters: [ProbeChapter]?
 	}
 	var output = ""
 	let status = try await runProcess(
 		Tools.path("ffprobe"),
-		["-v", "error", "-select_streams", "a:0", "-show_entries", "format=duration:format_tags:stream_tags", "-of", "json", file.path]
+		["-v", "error", "-select_streams", "a:0", "-show_chapters", "-show_entries", "format=duration:format_tags:stream_tags", "-of", "json", file.path]
 	) { line in
 		output += line + "\n"
 	}
@@ -75,7 +86,10 @@ func readAudioInfo(_ file: URL) async throws -> AudioInfo {
 	for (key, value) in (probe.streams?.first?.tags ?? [:]).merging(probe.format.tags ?? [:], uniquingKeysWith: { $1 }) {
 		tags[key.lowercased()] = value
 	}
-	return AudioInfo(duration: Double(probe.format.duration ?? "") ?? 0, tags: tags)
+	let chapters = (probe.chapters ?? []).map { chapter in
+		Chapter(start_time: Double(chapter.start_time) ?? 0, end_time: Double(chapter.end_time) ?? 0, title: chapter.tags?["title"])
+	}
+	return AudioInfo(duration: Double(probe.format.duration ?? "") ?? 0, chapters: chapters, tags: tags)
 }
 
 // Streams decoded samples through a small buffer, so a long file never sits in memory
@@ -122,6 +136,35 @@ func loadPeaks(_ file: URL, duration: Double, count: Int) async throws -> [Float
 		let loudest = peaks.max() ?? 0
 		return loudest > 0 ? peaks.map { $0 / loudest } : peaks
 	}.value
+}
+
+struct Span: Equatable {
+	let start: Double
+	let end: Double
+
+	var middle: Double { (start + end) / 2 }
+}
+
+// A gap between songs is usually at least a second below -40 dB
+@MainActor
+func detectSilence(_ file: URL, noise: String = "-40dB", seconds: Double = 1) async throws -> [Span] {
+	var spans: [Span] = []
+	var start: Double?
+	let status = try await runProcess(
+		Tools.path("ffmpeg"),
+		["-nostdin", "-nostats", "-i", file.path, "-map", "0:a:0", "-af", "silencedetect=noise=\(noise):d=\(seconds)", "-f", "null", "-"]
+	) { line in
+		if let match = line.firstMatch(of: /silence_start: (-?[\d.]+)/) {
+			start = max(0, Double(match.1) ?? 0)
+		} else if let match = line.firstMatch(of: /silence_end: ([\d.]+)/), let from = start, let end = Double(match.1) {
+			spans.append(Span(start: from, end: end))
+			start = nil
+		}
+	}
+	if status != 0 {
+		throw ShellError(message: "Silence detection failed")
+	}
+	return spans
 }
 
 func uniqueFile(in folder: URL, name: String, ext: String) -> URL {

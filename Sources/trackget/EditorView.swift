@@ -38,6 +38,7 @@ struct EditorView: View {
 								.lineLimit(1)
 								.truncationMode(.middle)
 							Spacer()
+							suggestMenu
 							Button("Open…", action: openFile)
 								.buttonStyle(.borderless)
 						}
@@ -79,6 +80,23 @@ struct EditorView: View {
 					.allowsHitTesting(false)
 			}
 		}
+	}
+
+	private var suggestMenu: some View {
+		Menu("Suggest", systemImage: "wand.and.stars") {
+			Button("Split at \(editor.chapter_cuts.count + 1) Chapters", action: editor.splitAtChapters)
+				.disabled(editor.chapter_cuts.isEmpty)
+			Button("Split at \(editor.silence_cuts.count) Silences", action: editor.splitAtSilences)
+				.disabled(editor.silence_cuts.isEmpty)
+			Divider()
+			Button("Trim Non-Music Sections", action: editor.trimNonMusic)
+				.disabled(!editor.can_trim_non_music)
+			Button("Trim Silence", action: editor.trimSilence)
+				.disabled(!editor.can_trim_silence)
+		}
+		.menuStyle(.borderlessButton)
+		.fixedSize()
+		.help("Purple lines are chapters, red areas are non-music sections from SponsorBlock, grey areas are silence")
 	}
 
 	private var controls: some View {
@@ -216,7 +234,7 @@ struct WaveformView: View {
 					.onChanged { value in
 						let marker = dragging ?? nearestMarker(x: value.startLocation.x, width: width)
 						dragging = marker
-						editor.move(marker, to: time(x: value.location.x, width: width))
+						editor.move(marker, to: snapped(time(x: value.location.x, width: width), width: width))
 						focused = true
 					}
 					.onEnded { _ in dragging = nil }
@@ -267,6 +285,16 @@ struct WaveformView: View {
 		editor.view_length > 0 ? (time - editor.view_start) / editor.view_length * width : 0
 	}
 
+	// Pulls a dragged marker onto a nearby suggestion, so splits land exactly on a chapter or silence
+	private func snapped(_ time: Double, width: Double) -> Double {
+		let reach = 6 * editor.view_length / max(width, 1)
+		let nearest = editor.snap_points.min { abs($0 - time) < abs($1 - time) }
+		if let nearest, abs(nearest - time) < reach {
+			return nearest
+		}
+		return time
+	}
+
 	// Grabs a marker within a few points of the click, otherwise the click moves the playhead
 	private func nearestMarker(x: Double, width: Double) -> Marker {
 		let candidates = editor.cuts.indices.map { Marker.cut($0) } + [.start, .end]
@@ -277,12 +305,30 @@ struct WaveformView: View {
 		return .playhead
 	}
 
+	private func band(_ span: Span, width: Double, height: Double) -> CGRect {
+		let start = position(span.start, width: width)
+		return CGRect(x: start, y: 0, width: max(1, position(span.end, width: width) - start), height: height)
+	}
+
 	private func draw(in context: inout GraphicsContext, size: CGSize) {
 		let width = size.width
 		let wave_height = size.height
 		let middle = wave_height / 2
 
 		context.fill(Path(roundedRect: CGRect(origin: .zero, size: size), cornerRadius: 6), with: .color(.secondary.opacity(0.08)))
+		for span in editor.silences {
+			context.fill(Path(band(span, width: width, height: wave_height)), with: .color(.secondary.opacity(0.15)))
+		}
+		for span in editor.non_music {
+			context.fill(Path(band(span, width: width, height: wave_height)), with: .color(.red.opacity(0.15)))
+		}
+		for chapter in editor.chapters {
+			let x = position(chapter.start_time, width: width)
+			var line = Path()
+			line.move(to: CGPoint(x: x, y: 0))
+			line.addLine(to: CGPoint(x: x, y: wave_height))
+			context.stroke(line, with: .color(.purple), style: StrokeStyle(lineWidth: 1.5, dash: [4, 3]))
+		}
 
 		// Each column shows the loudest peak in its time span, so detail survives at every zoom level
 		let peaks = editor.peaks
