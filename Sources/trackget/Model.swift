@@ -264,7 +264,7 @@ final class Model {
 				return
 			}
 			let target = uniqueFile(in: folder, name: "\(trimmed(self.artist)) - \(trimmed(self.title))", ext: source.pathExtension)
-			try await self.writeTags(self.trackTags(ext: target.pathExtension), from: source, to: target)
+			try await writeAudio(from: source, to: target, tags: self.trackTags(ext: target.pathExtension), log: self.appendLog)
 			self.saved_file = target
 			self.status = "Saved \(target.lastPathComponent)"
 		}
@@ -285,7 +285,7 @@ final class Model {
 			status = "Saving part \(number + 1) of \(included.count)…"
 			let target = uniqueFile(in: folder, name: "\(trimmed(part.artist)) - \(trimmed(part.title))", ext: source.pathExtension)
 			let tags = partTags(part, number: number + 1, of: included.count, ext: target.pathExtension)
-			try await writeTags(tags, from: source, to: target, range: (start, end))
+			try await writeAudio(from: source, to: target, tags: tags, range: (start, end), log: appendLog)
 			saved_file = target
 			saved += 1
 		}
@@ -358,35 +358,6 @@ final class Model {
 		return (URL(fileURLWithPath: file_path), removed)
 	}
 
-	// ffmpeg takes tag values as plain arguments, which avoids yt-dlp's --parse-metadata escaping rules
-	private func writeTags(_ tags: [(String, String)], from source: URL, to target: URL, range: (Double, Double?)? = nil) async throws {
-		var arguments = ["-nostdin", "-y", "-v", "error"]
-		// Seeking on the input keeps the cover art stream, which starts at zero
-		if let (start, end) = range {
-			arguments += ["-ss", String(format: "%.3f", start)]
-			if let end {
-				arguments += ["-to", String(format: "%.3f", end)]
-			}
-		}
-		arguments += ["-i", source.path, "-map", "0", "-c", "copy"]
-		// A copied flac stream keeps the full-length header; flac to flac is lossless
-		if range != nil && target.pathExtension == "flac" {
-			arguments += ["-c:a", "flac"]
-		}
-		for (key, value) in tags where !trimmed(value).isEmpty {
-			arguments += ["-metadata", "\(key)=\(trimmed(value))"]
-		}
-		if target.pathExtension == "mp3" {
-			arguments += ["-id3v2_version", "3"]
-		}
-		arguments.append(target.path)
-
-		let status = try await runProcess(Tools.path("ffmpeg"), arguments, onLine: appendLog)
-		if status != 0 {
-			throw ShellError(message: "ffmpeg tagging failed, see log")
-		}
-	}
-
 	private func work(_ label: String, _ body: @MainActor () async throws -> Void) async {
 		busy = true
 		progress = nil
@@ -431,15 +402,4 @@ private func decodeArtists(_ json: String) -> [String] {
 		return []
 	}
 	return list.filter { !$0.isEmpty }
-}
-
-private func uniqueFile(in folder: URL, name: String, ext: String) -> URL {
-	let safe_name = name.replacingOccurrences(of: "/", with: "-").replacingOccurrences(of: ":", with: "-")
-	var candidate = folder.appendingPathComponent("\(safe_name).\(ext)")
-	var counter = 2
-	while FileManager.default.fileExists(atPath: candidate.path) {
-		candidate = folder.appendingPathComponent("\(safe_name) (\(counter)).\(ext)")
-		counter += 1
-	}
-	return candidate
 }
