@@ -10,7 +10,13 @@ enum AudioFormat: String, CaseIterable, Identifiable {
 @MainActor
 @Observable
 final class Model {
-	var url = ""
+	var url = "" {
+		didSet {
+			if saved_file != nil && url != oldValue {
+				clearTrack()
+			}
+		}
+	}
 	var title = ""
 	var artist = ""
 	var artists = ""
@@ -47,6 +53,21 @@ final class Model {
 			return !included.isEmpty && included.allSatisfy { !trimmed($0.title).isEmpty && !trimmed($0.artist).isEmpty }
 		}
 		return true
+	}
+
+	private func clearTrack() {
+		title = ""
+		artist = ""
+		artists = ""
+		album = ""
+		album_artist = ""
+		year = ""
+		genre = ""
+		track_number = ""
+		parts = []
+		split_parts = false
+		saved_file = nil
+		status = ""
 	}
 
 	func prepareTools() async {
